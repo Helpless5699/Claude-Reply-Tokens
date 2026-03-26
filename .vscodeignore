@@ -1,0 +1,10 @@
+.git/**
+.github/**
+.vscode/**
+src/**
+out/test/**
+node_modules/**
+*.ts
+*.map
+tsconfig.json
+package-lock.json

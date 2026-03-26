@@ -1,0 +1,74 @@
+{
+  "name": "claude-reply-tokens",
+  "displayName": "Claude Reply Tokens",
+  "description": "Show token usage for the latest Claude Code reply in the VS Code status bar.",
+  "version": "0.1.0",
+  "publisher": "local-dev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Helpless5699/Claude-Reply-Tokens.git"
+  },
+  "homepage": "https://github.com/Helpless5699/Claude-Reply-Tokens",
+  "bugs": {
+    "url": "https://github.com/Helpless5699/Claude-Reply-Tokens/issues"
+  },
+  "engines": {
+    "vscode": "^1.86.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeReplyTokens.refresh",
+        "title": "Refresh Claude Reply Tokens",
+        "category": "Claude Reply Tokens"
+      },
+      {
+        "command": "claudeReplyTokens.openTranscript",
+        "title": "Open Claude Transcript",
+        "category": "Claude Reply Tokens"
+      },
+      {
+        "command": "claudeReplyTokens.openSettings",
+        "title": "Open Claude Reply Tokens Settings",
+        "category": "Claude Reply Tokens"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Reply Tokens",
+      "properties": {
+        "claudeReplyTokens.dataDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Claude config directory override. Point this at the folder that contains the projects subdirectory."
+        },
+        "claudeReplyTokens.refreshIntervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 30,
+          "description": "Fallback full-rescan interval in seconds."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm.cmd run compile && node --test out/test/sessionTracker.test.js",
+    "package:vsix": "npm.cmd run compile && npx @vscode/vsce package",
+    "publish:vsce": "npm.cmd run compile && npx @vscode/vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/vscode": "^1.86.0",
+    "@vscode/vsce": "^3.6.2",
+    "typescript": "^5.6.3"
+  }
+}
