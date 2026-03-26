@@ -3,7 +3,7 @@
   "displayName": "Claude Reply Tokens",
   "description": "Show token usage for the latest Claude Code reply in the VS Code status bar.",
   "version": "0.1.0",
-  "publisher": "local-dev",
+  "publisher": "helpless5699",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -61,9 +61,12 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm.cmd run compile && node --test out/test/sessionTracker.test.js",
-    "package:vsix": "npm.cmd run compile && npx @vscode/vsce package",
-    "publish:vsce": "npm.cmd run compile && npx @vscode/vsce publish"
+    "pretest": "npm run compile",
+    "test": "node --test out/test/sessionTracker.test.js",
+    "prepackage:vsix": "npm run compile",
+    "package:vsix": "vsce package",
+    "prepublish:vsce": "npm run compile",
+    "publish:vsce": "vsce publish"
   },
   "devDependencies": {
     "@types/node": "^20.16.5",

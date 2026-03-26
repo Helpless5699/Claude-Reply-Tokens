@@ -48,19 +48,19 @@ This extension contributes the following settings:
 Install dependencies:
 
 ```powershell
-npm.cmd install
+npm install
 ```
 
 Compile:
 
 ```powershell
-npm.cmd run compile
+npm run compile
 ```
 
 Run tests:
 
 ```powershell
-npm.cmd test
+npm test
 ```
 
 Launch an Extension Development Host:
@@ -73,7 +73,7 @@ Launch an Extension Development Host:
 Create a VSIX package:
 
 ```powershell
-npm.cmd run package:vsix
+npm run package:vsix
 ```
 
 This produces a file like:
@@ -92,7 +92,7 @@ code --install-extension .\claude-reply-tokens-0.1.0.vsix --force
 
 Recommended workflow:
 
-1. Run `npm.cmd run package:vsix`
+1. Run `npm run package:vsix`
 2. Upload the generated `.vsix` to your shared release location
 3. Ask teammates to install it with `code --install-extension ... --force`
 
@@ -101,3 +101,4 @@ Recommended workflow:
 - This extension currently tracks the current workspace only
 - It does not hook into the official Claude Code extension internals
 - If multiple Claude sessions match the same workspace, it uses the one with the latest assistant activity
+- Before publishing to VS Code Marketplace, replace `YOUR_PUBLISHER_ID` in `package.json` with your real publisher ID
