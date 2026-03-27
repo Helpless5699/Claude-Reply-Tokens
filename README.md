@@ -89,13 +89,13 @@ npm run package:vsix
 This produces a file like:
 
 ```text
-claude-reply-tokens-0.2.1.vsix
+claude-reply-tokens-0.2.2.vsix
 ```
 
 Install locally:
 
 ```powershell
-code --install-extension .\claude-reply-tokens-0.2.1.vsix --force
+code --install-extension .\claude-reply-tokens-0.2.2.vsix --force
 ```
 
 ## Team Distribution

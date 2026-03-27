@@ -85,7 +85,6 @@ export type TurnContentCategory =
   | "other";
 
 export interface ContentMetric {
-  label: string;
   chars: number;
   blocks: number;
 }

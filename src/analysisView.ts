@@ -43,7 +43,7 @@ export function renderTurnAnalysisWebview(
         <td>${index + 1}</td>
         <td>${escapeHtml(stepSummary)}</td>
         <td>${escapeHtml(formatLocalDateTime(step.timestamp, locale))}</td>
-        <td>${escapeHtml(step.stopReason ?? "end_turn")}</td>
+        <td>${escapeHtml(formatStopReason(step.stopReason))}</td>
         <td>${escapeHtml(formatExactTokens(step.breakdown.totalTokens, locale))}</td>
       </tr>
     `;
@@ -79,7 +79,7 @@ export function renderTurnAnalysisWebview(
             <span class="dot"></span>
             ${escapeHtml(formatLocalDateTime(analysis.timestamp, locale))}
             <span class="dot"></span>
-            ${escapeHtml(vscode.l10n.t("session {0}", analysis.sessionId))}
+            ${escapeHtml(vscode.l10n.t("Session {0}", analysis.sessionId))}
           </p>
         </div>
         <div class="actions">
@@ -296,6 +296,21 @@ function describeAssistantStep(kinds: string[], toolNames: string[]): string {
   });
 
   return labels.join(" + ");
+}
+
+function formatStopReason(stopReason: string | null): string {
+  switch (stopReason ?? "end_turn") {
+    case "end_turn":
+      return vscode.l10n.t("Turn ended normally");
+    case "tool_use":
+      return vscode.l10n.t("Tool call requested");
+    case "max_tokens":
+      return vscode.l10n.t("Max tokens reached");
+    case "stop_sequence":
+      return vscode.l10n.t("Stop sequence matched");
+    default:
+      return stopReason ?? "end_turn";
+  }
 }
 
 function formatPercentage(value: number, locale: string): string {

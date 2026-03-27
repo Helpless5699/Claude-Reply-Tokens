@@ -227,32 +227,26 @@ function accumulateUsage(breakdown: UsageBreakdown, usage: ClaudeUsage): void {
 function emptyContentMetrics(): ContentMetrics {
   return {
     userText: {
-      label: "User text",
       chars: 0,
       blocks: 0
     },
     toolResult: {
-      label: "Tool results",
       chars: 0,
       blocks: 0
     },
     assistantToolUse: {
-      label: "Assistant tool calls",
       chars: 0,
       blocks: 0
     },
     assistantThinking: {
-      label: "Assistant thinking",
       chars: 0,
       blocks: 0
     },
     assistantText: {
-      label: "Assistant text",
       chars: 0,
       blocks: 0
     },
     other: {
-      label: "Other blocks",
       chars: 0,
       blocks: 0
     }

@@ -29,7 +29,7 @@
   "No visible message content was captured for the latest turn.": "No visible message content was captured for the latest turn.",
   "Latest Claude Turn": "Latest Claude Turn",
   "{0} tok": "{0} tok",
-  "session {0}": "session {0}",
+  "Session {0}": "Session {0}",
   "Refresh": "Refresh",
   "Exact Token Buckets": "Exact Token Buckets",
   "Visible Content Mix": "Visible Content Mix",
@@ -59,5 +59,9 @@
   "Assistant step": "Assistant step",
   "Text": "Text",
   "Thinking": "Thinking",
-  "Tool planning": "Tool planning"
+  "Tool planning": "Tool planning",
+  "Turn ended normally": "Turn ended normally",
+  "Tool call requested": "Tool call requested",
+  "Max tokens reached": "Max tokens reached",
+  "Stop sequence matched": "Stop sequence matched"
 }
