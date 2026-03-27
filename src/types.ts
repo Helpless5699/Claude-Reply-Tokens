@@ -5,10 +5,49 @@ export interface ClaudeUsage {
   cache_read_input_tokens?: number;
 }
 
+export interface ClaudeTextContentBlock {
+  type: "text";
+  text?: string;
+}
+
+export interface ClaudeThinkingContentBlock {
+  type: "thinking";
+  thinking?: string;
+  signature?: string;
+}
+
+export interface ClaudeToolUseContentBlock {
+  type: "tool_use";
+  id?: string;
+  name?: string;
+  input?: unknown;
+}
+
+export interface ClaudeToolResultContentBlock {
+  type: "tool_result";
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+}
+
+export interface ClaudeGenericContentBlock {
+  type?: string;
+  [key: string]: unknown;
+}
+
+export type ClaudeContentBlock =
+  | ClaudeTextContentBlock
+  | ClaudeThinkingContentBlock
+  | ClaudeToolUseContentBlock
+  | ClaudeToolResultContentBlock
+  | ClaudeGenericContentBlock;
+
 export interface ClaudeMessage {
   role?: string;
   model?: string;
   id?: string;
+  content?: string | ClaudeContentBlock[];
+  stop_reason?: string | null;
   usage?: ClaudeUsage;
 }
 
@@ -31,6 +70,28 @@ export interface UsageBreakdown {
   totalTokens: number;
 }
 
+export type TokenBucketKind =
+  | "inputTokens"
+  | "outputTokens"
+  | "cacheWriteTokens"
+  | "cacheReadTokens";
+
+export type TurnContentCategory =
+  | "userText"
+  | "toolResult"
+  | "assistantToolUse"
+  | "assistantThinking"
+  | "assistantText"
+  | "other";
+
+export interface ContentMetric {
+  label: string;
+  chars: number;
+  blocks: number;
+}
+
+export type ContentMetrics = Record<TurnContentCategory, ContentMetric>;
+
 export interface SessionMatch {
   sessionId: string;
   jsonlPath: string;
@@ -45,6 +106,31 @@ export interface TurnUsage {
   timestamp: string;
   breakdown: UsageBreakdown;
   transcriptPath: string;
+}
+
+export interface AssistantStepAnalysis {
+  uuid: string;
+  timestamp: string;
+  model: string;
+  stopReason: string | null;
+  kinds: string[];
+  toolNames: string[];
+  breakdown: UsageBreakdown;
+}
+
+export interface TurnAnalysis {
+  sessionId: string;
+  assistantUuid: string;
+  model: string;
+  timestamp: string;
+  turnStartedAt: string;
+  transcriptPath: string;
+  breakdown: UsageBreakdown;
+  dominantTokenBucket: TokenBucketKind | null;
+  contentMetrics: ContentMetrics;
+  dominantContentCategory: TurnContentCategory | null;
+  steps: AssistantStepAnalysis[];
+  recordCount: number;
 }
 
 export interface SessionSnapshot {

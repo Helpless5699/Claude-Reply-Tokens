@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  computeLatestTurnAnalysis,
   computeLatestTurnUsage,
   discoverCurrentSession,
   loadSessionSnapshot,
@@ -37,6 +38,8 @@ function assistantRecord(params: {
   cacheWrite?: number;
   cacheRead?: number;
   model?: string;
+  content?: unknown[];
+  stopReason?: string | null;
 }): string {
   return JSON.stringify({
     type: "assistant",
@@ -48,6 +51,15 @@ function assistantRecord(params: {
     message: {
       role: "assistant",
       model: params.model ?? "claude-sonnet-4-6",
+      content:
+        params.content ??
+        [
+          {
+            type: "text",
+            text: "Assistant reply"
+          }
+        ],
+      stop_reason: params.stopReason ?? null,
       usage: {
         input_tokens: params.input,
         output_tokens: params.output,
@@ -64,6 +76,7 @@ function userRecord(params: {
   sessionId: string;
   cwd: string;
   timestamp: string;
+  content?: string | unknown[];
 }): string {
   return JSON.stringify({
     type: "user",
@@ -74,7 +87,7 @@ function userRecord(params: {
     timestamp: params.timestamp,
     message: {
       role: "user",
-      content: "Hello"
+      content: params.content ?? "Hello"
     }
   });
 }
@@ -129,6 +142,110 @@ test("aggregates the latest reply chain across multiple assistant records", asyn
   assert.equal(turnUsage.breakdown.cacheWriteTokens, 200);
   assert.equal(turnUsage.breakdown.cacheReadTokens, 12);
   assert.equal(turnUsage.breakdown.totalTokens, 387);
+});
+
+test("includes tool-result hops in the latest turn analysis", async () => {
+  const workspacePath = path.join(os.tmpdir(), "workspace-tool-turn");
+  const sessionId = "session-tool-turn";
+  const toolResultText = "A".repeat(1200);
+  const fixture = await createClaudeFixture(workspacePath, "tool-turn.jsonl", [
+    userRecord({
+      uuid: "user-1",
+      sessionId,
+      cwd: workspacePath,
+      timestamp: "2026-03-26T12:00:00.000Z",
+      content: [
+        {
+          type: "text",
+          text: "Please inspect this file."
+        }
+      ]
+    }),
+    assistantRecord({
+      uuid: "assistant-1",
+      parentUuid: "user-1",
+      sessionId,
+      cwd: workspacePath,
+      timestamp: "2026-03-26T12:00:01.000Z",
+      input: 30,
+      output: 20,
+      cacheWrite: 400,
+      content: [
+        {
+          type: "tool_use",
+          id: "tool-1",
+          name: "Read",
+          input: {
+            file_path: "README.md"
+          }
+        }
+      ],
+      stopReason: "tool_use"
+    }),
+    userRecord({
+      uuid: "user-2",
+      parentUuid: "assistant-1",
+      sessionId,
+      cwd: workspacePath,
+      timestamp: "2026-03-26T12:00:02.000Z",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "tool-1",
+          content: toolResultText
+        }
+      ]
+    }),
+    assistantRecord({
+      uuid: "assistant-2",
+      parentUuid: "user-2",
+      sessionId,
+      cwd: workspacePath,
+      timestamp: "2026-03-26T12:00:04.000Z",
+      input: 10,
+      output: 80,
+      cacheRead: 400,
+      content: [
+        {
+          type: "thinking",
+          thinking: "I should summarize the file."
+        },
+        {
+          type: "text",
+          text: "Here is the summary."
+        }
+      ],
+      stopReason: "end_turn"
+    })
+  ]);
+
+  const discovery = await discoverCurrentSession({
+    dataDirectory: fixture.claudeRoot,
+    workspaceFolders: [workspacePath],
+    preferredWorkspaceFolder: workspacePath
+  });
+  assert.ok(discovery.session);
+
+  const snapshot = await loadSessionSnapshot(discovery.session);
+  const turnUsage = computeLatestTurnUsage(snapshot);
+  const analysis = computeLatestTurnAnalysis(snapshot);
+
+  assert.ok(turnUsage);
+  assert.equal(turnUsage.breakdown.inputTokens, 40);
+  assert.equal(turnUsage.breakdown.outputTokens, 100);
+  assert.equal(turnUsage.breakdown.cacheWriteTokens, 400);
+  assert.equal(turnUsage.breakdown.cacheReadTokens, 400);
+  assert.equal(turnUsage.breakdown.totalTokens, 940);
+
+  assert.ok(analysis);
+  assert.equal(analysis.steps.length, 2);
+  assert.equal(analysis.recordCount, 4);
+  assert.equal(analysis.dominantTokenBucket, "cacheWriteTokens");
+  assert.equal(analysis.dominantContentCategory, "toolResult");
+  assert.deepEqual(analysis.steps[0].toolNames, ["Read"]);
+  assert.equal(analysis.contentMetrics.toolResult.chars, toolResultText.length);
+  assert.equal(analysis.contentMetrics.assistantThinking.blocks, 1);
+  assert.equal(analysis.breakdown.totalTokens, 940);
 });
 
 test("prefers the most recent matching session for the current workspace", async () => {

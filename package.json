@@ -2,7 +2,7 @@
   "name": "claude-reply-tokens",
   "displayName": "Claude Reply Tokens",
   "description": "Show token usage for the latest Claude Code reply in the VS Code status bar.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "helpless5699",
   "license": "MIT",
   "repository": {
@@ -28,6 +28,11 @@
       {
         "command": "claudeReplyTokens.refresh",
         "title": "Refresh Claude Reply Tokens",
+        "category": "Claude Reply Tokens"
+      },
+      {
+        "command": "claudeReplyTokens.openTurnAnalysis",
+        "title": "Open Latest Claude Turn Analysis",
         "category": "Claude Reply Tokens"
       },
       {

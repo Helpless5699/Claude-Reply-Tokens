@@ -14,9 +14,9 @@ export class StatusBarController {
       vscode.StatusBarAlignment.Left,
       98
     );
-    this.item.command = "claudeReplyTokens.openTranscript";
+    this.item.command = "claudeReplyTokens.openTurnAnalysis";
     this.item.text = "Claude -- tok";
-    this.item.tooltip = "Waiting for Claude Code reply data.";
+    this.item.tooltip = "Waiting for Claude Code reply data. Click to open the latest turn analysis.";
     this.item.show();
   }
 
@@ -50,7 +50,13 @@ export class StatusBarController {
       `Updated: \`${formatLocalDateTime(turnUsage.timestamp)}\`\n\n`
     );
     tooltip.appendMarkdown(`Session: \`${turnUsage.sessionId}\`\n\n`);
-    tooltip.appendMarkdown(`Transcript: \`${turnUsage.transcriptPath}\``);
+    tooltip.appendMarkdown(`Transcript: \`${turnUsage.transcriptPath}\`\n\n`);
+    tooltip.appendMarkdown(
+      "[Open turn analysis](command:claudeReplyTokens.openTurnAnalysis) | "
+    );
+    tooltip.appendMarkdown(
+      "[Open transcript](command:claudeReplyTokens.openTranscript)"
+    );
     tooltip.isTrusted = true;
 
     this.item.tooltip = tooltip;
@@ -58,7 +64,7 @@ export class StatusBarController {
 
   public showPlaceholder(message: string): void {
     this.item.text = "Claude -- tok";
-    this.item.tooltip = message;
+    this.item.tooltip = `${message} Click to open the latest turn analysis when data is ready.`;
   }
 
   public dispose(): void {

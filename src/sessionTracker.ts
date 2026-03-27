@@ -2,11 +2,17 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  AssistantStepAnalysis,
   ClaudeRecord,
+  ClaudeToolUseContentBlock,
   ClaudeUsage,
+  ContentMetrics,
   SessionDiscovery,
   SessionMatch,
   SessionSnapshot,
+  TokenBucketKind,
+  TurnAnalysis,
+  TurnContentCategory,
   TrackerConfig,
   TurnUsage,
   UsageBreakdown
@@ -16,6 +22,16 @@ import { normalizeFsPath, workspaceMatchesCwd } from "./utils";
 const CLAUDE_CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR";
 const PROJECTS_DIR_NAME = "projects";
 const DEFAULT_REFRESH_ENCODING = "utf8";
+
+interface CountableAssistantRecord extends ClaudeRecord {
+  uuid: string;
+  timestamp: string;
+}
+
+interface LatestTurnRecords {
+  latestAssistant: CountableAssistantRecord;
+  records: ClaudeRecord[];
+}
 
 export async function discoverCurrentSession(
   config: TrackerConfig
@@ -111,47 +127,76 @@ export async function refreshSessionSnapshot(
 }
 
 export function computeLatestTurnUsage(snapshot: SessionSnapshot): TurnUsage | null {
-  const recordByUuid = buildRecordIndex(snapshot.records);
-  const latestAssistant = findLatestCountableAssistant(snapshot.records);
-  if (!latestAssistant?.uuid || !latestAssistant.timestamp) {
+  const latestTurn = collectLatestTurnRecords(snapshot);
+  if (!latestTurn) {
     return null;
   }
 
-  const visited = new Set<string>();
   const breakdown = emptyBreakdown();
-  let current: ClaudeRecord | undefined = latestAssistant;
-
-  while (current?.uuid && !visited.has(current.uuid)) {
-    visited.add(current.uuid);
-
-    if (current.type === "user") {
-      break;
+  for (const record of latestTurn.records) {
+    if (isCountableAssistant(record)) {
+      accumulateUsage(breakdown, record.message!.usage!);
     }
-
-    if (isCountableAssistant(current)) {
-      accumulateUsage(breakdown, current.message!.usage!);
-    }
-
-    const parentUuid = current.parentUuid ?? undefined;
-    if (!parentUuid) {
-      break;
-    }
-
-    const parentRecord = recordByUuid.get(parentUuid);
-    if (!parentRecord || parentRecord.type === "user") {
-      break;
-    }
-
-    current = parentRecord;
   }
 
   return {
     sessionId: snapshot.session.sessionId,
-    assistantUuid: latestAssistant.uuid,
-    model: latestAssistant.message?.model ?? "unknown",
-    timestamp: latestAssistant.timestamp,
+    assistantUuid: latestTurn.latestAssistant.uuid,
+    model: latestTurn.latestAssistant.message?.model ?? "unknown",
+    timestamp: latestTurn.latestAssistant.timestamp,
     breakdown,
     transcriptPath: snapshot.session.jsonlPath
+  };
+}
+
+export function computeLatestTurnAnalysis(
+  snapshot: SessionSnapshot
+): TurnAnalysis | null {
+  const latestTurn = collectLatestTurnRecords(snapshot);
+  if (!latestTurn) {
+    return null;
+  }
+
+  const breakdown = emptyBreakdown();
+  const contentMetrics = emptyContentMetrics();
+  const steps: AssistantStepAnalysis[] = [];
+
+  for (const record of latestTurn.records) {
+    accumulateRecordContentMetrics(contentMetrics, record);
+
+    if (isCountableAssistant(record)) {
+      const stepBreakdown = emptyBreakdown();
+      accumulateUsage(stepBreakdown, record.message!.usage!);
+      accumulateUsage(breakdown, record.message!.usage!);
+
+      steps.push({
+        uuid:
+          record.uuid ??
+          `${snapshot.session.sessionId}-assistant-step-${steps.length + 1}`,
+        timestamp: record.timestamp ?? latestTurn.latestAssistant.timestamp,
+        model: record.message?.model ?? latestTurn.latestAssistant.message?.model ?? "unknown",
+        stopReason: record.message?.stop_reason ?? null,
+        kinds: collectAssistantKinds(record),
+        toolNames: collectAssistantToolNames(record),
+        breakdown: stepBreakdown
+      });
+    }
+  }
+
+  return {
+    sessionId: snapshot.session.sessionId,
+    assistantUuid: latestTurn.latestAssistant.uuid,
+    model: latestTurn.latestAssistant.message?.model ?? "unknown",
+    timestamp: latestTurn.latestAssistant.timestamp,
+    turnStartedAt:
+      latestTurn.records[0]?.timestamp ?? latestTurn.latestAssistant.timestamp,
+    transcriptPath: snapshot.session.jsonlPath,
+    breakdown,
+    dominantTokenBucket: findDominantTokenBucket(breakdown),
+    contentMetrics,
+    dominantContentCategory: findDominantContentCategory(contentMetrics),
+    steps,
+    recordCount: latestTurn.records.length
   };
 }
 
@@ -179,6 +224,41 @@ function accumulateUsage(breakdown: UsageBreakdown, usage: ClaudeUsage): void {
     inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens;
 }
 
+function emptyContentMetrics(): ContentMetrics {
+  return {
+    userText: {
+      label: "User text",
+      chars: 0,
+      blocks: 0
+    },
+    toolResult: {
+      label: "Tool results",
+      chars: 0,
+      blocks: 0
+    },
+    assistantToolUse: {
+      label: "Assistant tool calls",
+      chars: 0,
+      blocks: 0
+    },
+    assistantThinking: {
+      label: "Assistant thinking",
+      chars: 0,
+      blocks: 0
+    },
+    assistantText: {
+      label: "Assistant text",
+      chars: 0,
+      blocks: 0
+    },
+    other: {
+      label: "Other blocks",
+      chars: 0,
+      blocks: 0
+    }
+  };
+}
+
 function buildRecordIndex(records: ClaudeRecord[]): Map<string, ClaudeRecord> {
   const index = new Map<string, ClaudeRecord>();
   for (const record of records) {
@@ -200,6 +280,58 @@ function findLatestCountableAssistant(records: ClaudeRecord[]): ClaudeRecord | u
   return undefined;
 }
 
+function collectLatestTurnRecords(
+  snapshot: SessionSnapshot
+): LatestTurnRecords | null {
+  const latestAssistant = findLatestTrackedAssistant(snapshot.records);
+  if (!latestAssistant) {
+    return null;
+  }
+
+  const recordByUuid = buildRecordIndex(snapshot.records);
+  const chain: ClaudeRecord[] = [];
+  const visited = new Set<string>();
+  let current: ClaudeRecord | undefined = latestAssistant;
+
+  while (current?.uuid && !visited.has(current.uuid)) {
+    visited.add(current.uuid);
+    chain.push(current);
+
+    const parentUuid = current.parentUuid ?? undefined;
+    if (!parentUuid) {
+      break;
+    }
+
+    const parentRecord = recordByUuid.get(parentUuid);
+    if (!parentRecord) {
+      break;
+    }
+
+    if (isTurnBoundaryUser(parentRecord)) {
+      chain.push(parentRecord);
+      break;
+    }
+
+    current = parentRecord;
+  }
+
+  return {
+    latestAssistant,
+    records: chain.reverse()
+  };
+}
+
+function findLatestTrackedAssistant(
+  records: ClaudeRecord[]
+): CountableAssistantRecord | undefined {
+  const latestAssistant = findLatestCountableAssistant(records);
+  if (!latestAssistant?.uuid || !latestAssistant.timestamp) {
+    return undefined;
+  }
+
+  return latestAssistant as CountableAssistantRecord;
+}
+
 function isCountableAssistant(record: ClaudeRecord | undefined): boolean {
   if (!record || record.type !== "assistant" || record.isApiErrorMessage) {
     return false;
@@ -218,6 +350,191 @@ function isCountableAssistant(record: ClaudeRecord | undefined): boolean {
   }
 
   return record.message?.model !== "<synthetic>";
+}
+
+function isTurnBoundaryUser(record: ClaudeRecord): boolean {
+  return record.type === "user" && !isToolResultOnlyUser(record);
+}
+
+function isToolResultOnlyUser(record: ClaudeRecord): boolean {
+  if (record.type !== "user") {
+    return false;
+  }
+
+  const content = record.message?.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+
+  return content.every(
+    (block) =>
+      typeof block === "object" &&
+      block !== null &&
+      (block.type ?? undefined) === "tool_result"
+  );
+}
+
+function accumulateRecordContentMetrics(
+  metrics: ContentMetrics,
+  record: ClaudeRecord
+): void {
+  const content = record.message?.content;
+  if (typeof content === "string") {
+    addContentMetric(
+      metrics,
+      record.type === "assistant" ? "assistantText" : "userText",
+      content.length
+    );
+    return;
+  }
+
+  if (!Array.isArray(content)) {
+    return;
+  }
+
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+
+    switch (block.type) {
+      case "text":
+        addContentMetric(
+          metrics,
+          record.type === "assistant" ? "assistantText" : "userText",
+          typeof block.text === "string" ? block.text.length : 0
+        );
+        break;
+      case "thinking":
+        addContentMetric(
+          metrics,
+          "assistantThinking",
+          typeof block.thinking === "string" ? block.thinking.length : 0
+        );
+        break;
+      case "tool_use":
+        addContentMetric(
+          metrics,
+          "assistantToolUse",
+          estimateValueLength({
+            name: (block as ClaudeToolUseContentBlock).name,
+            input: (block as ClaudeToolUseContentBlock).input
+          })
+        );
+        break;
+      case "tool_result":
+        addContentMetric(
+          metrics,
+          "toolResult",
+          estimateValueLength(block.content)
+        );
+        break;
+      default:
+        addContentMetric(metrics, "other", estimateValueLength(block));
+        break;
+    }
+  }
+}
+
+function addContentMetric(
+  metrics: ContentMetrics,
+  category: TurnContentCategory,
+  chars: number
+): void {
+  metrics[category].blocks += 1;
+  metrics[category].chars += Math.max(0, chars);
+}
+
+function estimateValueLength(value: unknown): number {
+  if (typeof value === "string") {
+    return value.length;
+  }
+
+  if (Array.isArray(value)) {
+    return value.reduce((sum, entry) => sum + estimateValueLength(entry), 0);
+  }
+
+  if (value === null || value === undefined) {
+    return 0;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).length;
+  }
+
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return 0;
+  }
+}
+
+function collectAssistantKinds(record: ClaudeRecord): string[] {
+  const content = record.message?.content;
+  const kinds = new Set<string>();
+
+  if (typeof content === "string" && content.trim().length > 0) {
+    kinds.add("text");
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+
+      kinds.add(typeof block.type === "string" ? block.type : "other");
+    }
+  }
+
+  return Array.from(kinds.values());
+}
+
+function collectAssistantToolNames(record: ClaudeRecord): string[] {
+  const content = record.message?.content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  const toolNames = new Set<string>();
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === "object" &&
+      block.type === "tool_use" &&
+      typeof (block as ClaudeToolUseContentBlock).name === "string"
+    ) {
+      toolNames.add((block as ClaudeToolUseContentBlock).name!);
+    }
+  }
+
+  return Array.from(toolNames.values());
+}
+
+function findDominantTokenBucket(
+  breakdown: UsageBreakdown
+): TokenBucketKind | null {
+  const candidates: Array<[TokenBucketKind, number]> = [
+    ["inputTokens", breakdown.inputTokens],
+    ["outputTokens", breakdown.outputTokens],
+    ["cacheWriteTokens", breakdown.cacheWriteTokens],
+    ["cacheReadTokens", breakdown.cacheReadTokens]
+  ];
+  const dominant = candidates.reduce((best, current) =>
+    current[1] > best[1] ? current : best
+  );
+
+  return dominant[1] > 0 ? dominant[0] : null;
+}
+
+function findDominantContentCategory(
+  metrics: ContentMetrics
+): TurnContentCategory | null {
+  const entries = Object.entries(metrics) as Array<[TurnContentCategory, ContentMetrics[TurnContentCategory]]>;
+  const dominant = entries.reduce(
+    (best, current) => (current[1].chars > best[1].chars ? current : best),
+    entries[0]
+  );
+
+  return dominant && dominant[1].chars > 0 ? dominant[0] : null;
 }
 
 function parseJsonlText(text: string): {

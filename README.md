@@ -10,11 +10,12 @@ It does not depend on private APIs from the official `anthropic.claude-code` ext
 - Aggregates a full reply chain instead of only the last assistant JSONL record
 - Matches Claude sessions to the current workspace
 - Refreshes automatically when Claude writes new transcript lines
-- Opens the matching transcript file from the status bar
+- Opens a latest-turn analysis panel from the status bar
+- Keeps the matching transcript available as a separate command
 
 ## How It Works
 
-The extension scans Claude's local `projects/**/*.jsonl` files, finds the most relevant session for the current workspace, and sums token usage across the latest assistant reply chain by walking `parentUuid`.
+The extension scans Claude's local `projects/**/*.jsonl` files, finds the most relevant session for the current workspace, and reconstructs the latest full turn by walking `parentUuid` across assistant records and intermediate `tool_result` user records.
 
 The total includes:
 
@@ -22,6 +23,14 @@ The total includes:
 - `output_tokens`
 - `cache_creation_input_tokens`
 - `cache_read_input_tokens`
+
+Clicking the status bar opens a latest-turn analysis panel that shows:
+
+- Exact token buckets for the turn (`input / output / cache write / cache read`)
+- A heuristic content mix by message-block category (`user text / tool result / assistant tool use / assistant thinking / assistant text`)
+- Per-assistant-step totals so you can see which call in the turn was expensive
+
+Claude's JSONL logs expose usage per assistant record, not per content block, so the content-category section is heuristic rather than exact token accounting.
 
 ## Requirements
 
@@ -40,6 +49,7 @@ This extension contributes the following settings:
 ## Commands
 
 - `Claude Reply Tokens: Refresh`
+- `Claude Reply Tokens: Open Latest Claude Turn Analysis`
 - `Claude Reply Tokens: Open Claude Transcript`
 - `Claude Reply Tokens: Open Claude Reply Tokens Settings`
 
@@ -79,13 +89,13 @@ npm run package:vsix
 This produces a file like:
 
 ```text
-claude-reply-tokens-0.1.0.vsix
+claude-reply-tokens-0.1.1.vsix
 ```
 
 Install locally:
 
 ```powershell
-code --install-extension .\claude-reply-tokens-0.1.0.vsix --force
+code --install-extension .\claude-reply-tokens-0.1.1.vsix --force
 ```
 
 ## Team Distribution

@@ -1,6 +1,8 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { renderTurnAnalysisWebview } from "./analysisView";
 import {
+  computeLatestTurnAnalysis,
   computeLatestTurnUsage,
   discoverCurrentSession,
   loadSessionSnapshot,
@@ -24,6 +26,7 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
   private watchedSessionPath: string | null = null;
   private projectsWatcher: vscode.FileSystemWatcher | null = null;
   private activeSessionWatcher: vscode.FileSystemWatcher | null = null;
+  private analysisPanel: vscode.WebviewPanel | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
   private refreshInFlight = false;
   private queuedMode: "incremental" | "full" | null = null;
@@ -53,6 +56,8 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
 
     this.projectsWatcher?.dispose();
     this.activeSessionWatcher?.dispose();
+    this.analysisPanel?.dispose();
+    this.analysisPanel = null;
     this.statusBar.dispose();
     vscode.Disposable.from(...this.subscriptions).dispose();
   }
@@ -62,6 +67,12 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
       vscode.commands.registerCommand("claudeReplyTokens.refresh", async () => {
         await this.runRefresh("full");
       }),
+      vscode.commands.registerCommand(
+        "claudeReplyTokens.openTurnAnalysis",
+        async () => {
+          await this.openTurnAnalysis();
+        }
+      ),
       vscode.commands.registerCommand(
         "claudeReplyTokens.openTranscript",
         async () => {
@@ -217,6 +228,7 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
       this.statusBar.showPlaceholder(
         "No Claude reply data matches the current workspace yet."
       );
+      this.refreshAnalysisPanel();
       return;
     }
 
@@ -225,10 +237,54 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
       this.statusBar.showPlaceholder(
         "Claude session found, but there is no completed assistant reply with usage data yet."
       );
+      this.refreshAnalysisPanel();
       return;
     }
 
     this.statusBar.showUsage(turnUsage);
+    this.refreshAnalysisPanel();
+  }
+
+  private async openTurnAnalysis(): Promise<void> {
+    const analysis = this.currentSnapshot
+      ? computeLatestTurnAnalysis(this.currentSnapshot)
+      : null;
+
+    if (!analysis) {
+      void vscode.window.showInformationMessage(
+        "No completed Claude turn is available for the current workspace yet."
+      );
+      return;
+    }
+
+    if (!this.analysisPanel) {
+      this.analysisPanel = vscode.window.createWebviewPanel(
+        "claudeReplyTokens.turnAnalysis",
+        "Claude Turn Analysis",
+        vscode.ViewColumn.Beside,
+        {
+          enableCommandUris: true
+        }
+      );
+      this.analysisPanel.onDidDispose(() => {
+        this.analysisPanel = null;
+      });
+    } else {
+      this.analysisPanel.reveal(vscode.ViewColumn.Beside, false);
+    }
+
+    this.analysisPanel.webview.html = renderTurnAnalysisWebview(analysis);
+  }
+
+  private refreshAnalysisPanel(): void {
+    if (!this.analysisPanel) {
+      return;
+    }
+
+    const analysis = this.currentSnapshot
+      ? computeLatestTurnAnalysis(this.currentSnapshot)
+      : null;
+    this.analysisPanel.webview.html = renderTurnAnalysisWebview(analysis);
   }
 
   private reconfigureProjectsWatcher(projectsPath: string | null): void {
