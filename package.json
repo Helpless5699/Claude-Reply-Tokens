@@ -1,8 +1,9 @@
 {
   "name": "claude-reply-tokens",
-  "displayName": "Claude Reply Tokens",
-  "description": "Show token usage for the latest Claude Code reply in the VS Code status bar.",
-  "version": "0.1.1",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
+  "icon": "icon.png",
+  "version": "0.2.1",
   "publisher": "helpless5699",
   "license": "MIT",
   "repository": {
@@ -23,42 +24,43 @@
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
+  "l10n": "./l10n",
   "contributes": {
     "commands": [
       {
         "command": "claudeReplyTokens.refresh",
-        "title": "Refresh Claude Reply Tokens",
-        "category": "Claude Reply Tokens"
+        "title": "%command.refresh.title%",
+        "category": "%command.category%"
       },
       {
         "command": "claudeReplyTokens.openTurnAnalysis",
-        "title": "Open Latest Claude Turn Analysis",
-        "category": "Claude Reply Tokens"
+        "title": "%command.openTurnAnalysis.title%",
+        "category": "%command.category%"
       },
       {
         "command": "claudeReplyTokens.openTranscript",
-        "title": "Open Claude Transcript",
-        "category": "Claude Reply Tokens"
+        "title": "%command.openTranscript.title%",
+        "category": "%command.category%"
       },
       {
         "command": "claudeReplyTokens.openSettings",
-        "title": "Open Claude Reply Tokens Settings",
-        "category": "Claude Reply Tokens"
+        "title": "%command.openSettings.title%",
+        "category": "%command.category%"
       }
     ],
     "configuration": {
-      "title": "Claude Reply Tokens",
+      "title": "%configuration.title%",
       "properties": {
         "claudeReplyTokens.dataDirectory": {
           "type": "string",
           "default": "",
-          "description": "Claude config directory override. Point this at the folder that contains the projects subdirectory."
+          "description": "%configuration.dataDirectory.description%"
         },
         "claudeReplyTokens.refreshIntervalSeconds": {
           "type": "number",
           "default": 30,
           "minimum": 30,
-          "description": "Fallback full-rescan interval in seconds."
+          "description": "%configuration.refreshIntervalSeconds.description%"
         }
       }
     }

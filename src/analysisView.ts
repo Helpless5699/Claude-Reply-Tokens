@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import {
   ContentMetric,
   ContentMetrics,
@@ -14,74 +15,98 @@ import {
 export function renderTurnAnalysisWebview(
   analysis: TurnAnalysis | null
 ): string {
+  const locale = vscode.env.language || "en";
+
   if (!analysis) {
     return renderShell({
-      title: "Claude Turn Analysis",
+      language: locale,
+      title: vscode.l10n.t("Claude Turn Analysis"),
       body: `
         <section class="card empty">
-          <h1>No completed Claude turn yet</h1>
-          <p>Wait for Claude to finish a reply in this workspace, then click the status bar again.</p>
+          <h1>${escapeHtml(vscode.l10n.t("No completed Claude turn yet"))}</h1>
+          <p>${escapeHtml(
+            vscode.l10n.t(
+              "Wait for Claude to finish a reply in this workspace, then click the status bar again."
+            )
+          )}</p>
         </section>
       `
     });
   }
 
-  const tokenRows = renderTokenRows(analysis);
-  const contentRows = renderContentRows(analysis.contentMetrics);
+  const tokenRows = renderTokenRows(analysis, locale);
+  const contentRows = renderContentRows(analysis.contentMetrics, locale);
   const stepRows = analysis.steps.map((step, index) => {
     const stepSummary = describeAssistantStep(step.kinds, step.toolNames);
     return `
       <tr>
         <td>${index + 1}</td>
         <td>${escapeHtml(stepSummary)}</td>
-        <td>${escapeHtml(formatLocalDateTime(step.timestamp))}</td>
+        <td>${escapeHtml(formatLocalDateTime(step.timestamp, locale))}</td>
         <td>${escapeHtml(step.stopReason ?? "end_turn")}</td>
-        <td>${escapeHtml(formatExactTokens(step.breakdown.totalTokens))}</td>
+        <td>${escapeHtml(formatExactTokens(step.breakdown.totalTokens, locale))}</td>
       </tr>
     `;
   });
 
   const dominantTokenText = analysis.dominantTokenBucket
-    ? `${tokenBucketLabel(analysis.dominantTokenBucket)} is the largest exact token bucket this turn.`
-    : "No token usage was recorded for the latest turn.";
+    ? vscode.l10n.t(
+        "{0} is the largest exact token bucket this turn.",
+        tokenBucketLabel(analysis.dominantTokenBucket)
+      )
+    : vscode.l10n.t("No token usage was recorded for the latest turn.");
   const dominantContentText = analysis.dominantContentCategory
-    ? `${analysis.contentMetrics[analysis.dominantContentCategory].label} is the largest visible content category by size.`
-    : "No visible message content was captured for the latest turn.";
+    ? vscode.l10n.t(
+        "{0} is the largest visible content category by size.",
+        contentCategoryLabel(analysis.dominantContentCategory)
+      )
+    : vscode.l10n.t("No visible message content was captured for the latest turn.");
   const openTranscriptUri = "command:claudeReplyTokens.openTranscript";
   const refreshUri = "command:claudeReplyTokens.refresh";
 
   return renderShell({
-    title: "Claude Turn Analysis",
+    language: locale,
+    title: vscode.l10n.t("Claude Turn Analysis"),
     body: `
       <header class="hero">
         <div>
-          <p class="eyebrow">Latest Claude Turn</p>
-          <h1>${escapeHtml(formatCompactTokens(analysis.breakdown.totalTokens))} tok</h1>
+          <p class="eyebrow">${escapeHtml(vscode.l10n.t("Latest Claude Turn"))}</p>
+          <h1>${escapeHtml(
+            vscode.l10n.t("{0} tok", formatCompactTokens(analysis.breakdown.totalTokens))
+          )}</h1>
           <p class="meta">
             ${escapeHtml(analysis.model)}
             <span class="dot"></span>
-            ${escapeHtml(formatLocalDateTime(analysis.timestamp))}
+            ${escapeHtml(formatLocalDateTime(analysis.timestamp, locale))}
             <span class="dot"></span>
-            session ${escapeHtml(analysis.sessionId)}
+            ${escapeHtml(vscode.l10n.t("session {0}", analysis.sessionId))}
           </p>
         </div>
         <div class="actions">
-          <a class="button" href="${openTranscriptUri}">Open transcript</a>
-          <a class="button secondary" href="${refreshUri}">Refresh</a>
+          <a class="button" href="${openTranscriptUri}">${escapeHtml(
+            vscode.l10n.t("Open transcript")
+          )}</a>
+          <a class="button secondary" href="${refreshUri}">${escapeHtml(
+            vscode.l10n.t("Refresh")
+          )}</a>
         </div>
       </header>
 
       <section class="grid">
         <article class="card">
-          <h2>Exact Token Buckets</h2>
+          <h2>${escapeHtml(vscode.l10n.t("Exact Token Buckets"))}</h2>
           <p class="muted">${escapeHtml(dominantTokenText)}</p>
           <div class="rows">${tokenRows}</div>
         </article>
 
         <article class="card">
-          <h2>Visible Content Mix</h2>
+          <h2>${escapeHtml(vscode.l10n.t("Visible Content Mix"))}</h2>
           <p class="muted">
-            Heuristic only. Claude logs expose token usage per assistant record, not per content block.
+            ${escapeHtml(
+              vscode.l10n.t(
+                "Heuristic only. Claude logs expose token usage per assistant record, not per content block."
+              )
+            )}
           </p>
           <p class="muted">${escapeHtml(dominantContentText)}</p>
           <div class="rows">${contentRows}</div>
@@ -89,18 +114,26 @@ export function renderTurnAnalysisWebview(
       </section>
 
       <section class="card">
-        <h2>Assistant Steps</h2>
+        <h2>${escapeHtml(vscode.l10n.t("Assistant Steps"))}</h2>
         <p class="muted">
-          ${analysis.steps.length} assistant call(s) across ${analysis.recordCount} record(s) in this turn.
+          ${escapeHtml(
+            vscode.l10n.t(
+              "{callCount} assistant call(s) across {recordCount} record(s) in this turn.",
+              {
+                callCount: analysis.steps.length,
+                recordCount: analysis.recordCount
+              }
+            )
+          )}
         </p>
         <table>
           <thead>
             <tr>
               <th>#</th>
-              <th>Step</th>
-              <th>Time</th>
-              <th>Stop reason</th>
-              <th>Total tokens</th>
+              <th>${escapeHtml(vscode.l10n.t("Step"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Time"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Stop reason"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Total tokens"))}</th>
             </tr>
           </thead>
           <tbody>
@@ -110,42 +143,48 @@ export function renderTurnAnalysisWebview(
       </section>
 
       <section class="card small">
-        <h2>Context</h2>
-        <p>Turn start: <code>${escapeHtml(formatLocalDateTime(analysis.turnStartedAt))}</code></p>
-        <p>Turn end: <code>${escapeHtml(formatLocalDateTime(analysis.timestamp))}</code></p>
-        <p>Transcript: <code>${escapeHtml(analysis.transcriptPath)}</code></p>
+        <h2>${escapeHtml(vscode.l10n.t("Context"))}</h2>
+        <p>${escapeHtml(vscode.l10n.t("Turn start"))}: <code>${escapeHtml(
+          formatLocalDateTime(analysis.turnStartedAt, locale)
+        )}</code></p>
+        <p>${escapeHtml(vscode.l10n.t("Turn end"))}: <code>${escapeHtml(
+          formatLocalDateTime(analysis.timestamp, locale)
+        )}</code></p>
+        <p>${escapeHtml(vscode.l10n.t("Transcript"))}: <code>${escapeHtml(
+          analysis.transcriptPath
+        )}</code></p>
       </section>
     `
   });
 }
 
-function renderTokenRows(analysis: TurnAnalysis): string {
+function renderTokenRows(analysis: TurnAnalysis, locale: string): string {
   const total = Math.max(analysis.breakdown.totalTokens, 1);
   const rows: Array<{ label: string; value: number }> = [
     {
-      label: "Input",
+      label: tokenBucketLabel("inputTokens"),
       value: analysis.breakdown.inputTokens
     },
     {
-      label: "Output",
+      label: tokenBucketLabel("outputTokens"),
       value: analysis.breakdown.outputTokens
     },
     {
-      label: "Cache write",
+      label: tokenBucketLabel("cacheWriteTokens"),
       value: analysis.breakdown.cacheWriteTokens
     },
     {
-      label: "Cache read",
+      label: tokenBucketLabel("cacheReadTokens"),
       value: analysis.breakdown.cacheReadTokens
     }
   ];
 
   return rows
-    .map((row) => renderMetricRow(row.label, row.value, total))
+    .map((row) => renderMetricRow(row.label, row.value, total, vscode.l10n.t("tok"), locale))
     .join("");
 }
 
-function renderContentRows(metrics: ContentMetrics): string {
+function renderContentRows(metrics: ContentMetrics, locale: string): string {
   const entries = sortMetrics(metrics);
   const totalChars = Math.max(
     entries.reduce((sum, [, metric]) => sum + metric.chars, 0),
@@ -153,12 +192,13 @@ function renderContentRows(metrics: ContentMetrics): string {
   );
 
   return entries
-    .map(([, metric]) =>
+    .map(([category, metric]) =>
       renderMetricRow(
-        `${metric.label} (${metric.blocks} block${metric.blocks === 1 ? "" : "s"})`,
+        vscode.l10n.t("{0} ({1})", contentCategoryLabel(category), blockCountLabel(metric.blocks)),
         metric.chars,
         totalChars,
-        "chars"
+        vscode.l10n.t("chars"),
+        locale
       )
     )
     .join("");
@@ -176,14 +216,17 @@ function renderMetricRow(
   label: string,
   value: number,
   total: number,
-  suffix = "tok"
+  suffix: string,
+  locale: string
 ): string {
   const percentage = total > 0 ? (value / total) * 100 : 0;
   return `
     <div class="row">
       <div class="row-head">
         <span>${escapeHtml(label)}</span>
-        <span>${escapeHtml(`${formatExactTokens(value)} ${suffix}`)} | ${percentage.toFixed(1)}%</span>
+        <span>${escapeHtml(
+          vscode.l10n.t("{0} {1}", formatExactTokens(value, locale), suffix)
+        )} | ${escapeHtml(formatPercentage(percentage, locale))}%</span>
       </div>
       <div class="bar">
         <span style="width: ${Math.max(percentage, value > 0 ? 2 : 0)}%"></span>
@@ -195,33 +238,58 @@ function renderMetricRow(
 function tokenBucketLabel(bucket: TokenBucketKind): string {
   switch (bucket) {
     case "inputTokens":
-      return "Input";
+      return vscode.l10n.t("Input");
     case "outputTokens":
-      return "Output";
+      return vscode.l10n.t("Output");
     case "cacheWriteTokens":
-      return "Cache write";
+      return vscode.l10n.t("Cache write");
     case "cacheReadTokens":
-      return "Cache read";
+      return vscode.l10n.t("Cache read");
   }
+}
+
+function contentCategoryLabel(category: TurnContentCategory): string {
+  switch (category) {
+    case "userText":
+      return vscode.l10n.t("User text");
+    case "toolResult":
+      return vscode.l10n.t("Tool results");
+    case "assistantToolUse":
+      return vscode.l10n.t("Assistant tool calls");
+    case "assistantThinking":
+      return vscode.l10n.t("Assistant thinking");
+    case "assistantText":
+      return vscode.l10n.t("Assistant text");
+    case "other":
+      return vscode.l10n.t("Other blocks");
+  }
+}
+
+function blockCountLabel(count: number): string {
+  if (count === 1) {
+    return vscode.l10n.t("{0} block", count);
+  }
+
+  return vscode.l10n.t("{0} blocks", count);
 }
 
 function describeAssistantStep(kinds: string[], toolNames: string[]): string {
   if (toolNames.length > 0) {
-    return `Tool call: ${toolNames.join(", ")}`;
+    return vscode.l10n.t("Tool call: {0}", toolNames.join(", "));
   }
 
   if (kinds.length === 0) {
-    return "Assistant step";
+    return vscode.l10n.t("Assistant step");
   }
 
   const labels = kinds.map((kind) => {
     switch (kind) {
       case "text":
-        return "Text";
+        return vscode.l10n.t("Text");
       case "thinking":
-        return "Thinking";
+        return vscode.l10n.t("Thinking");
       case "tool_use":
-        return "Tool planning";
+        return vscode.l10n.t("Tool planning");
       default:
         return kind;
     }
@@ -230,9 +298,16 @@ function describeAssistantStep(kinds: string[], toolNames: string[]): string {
   return labels.join(" + ");
 }
 
-function renderShell(params: { title: string; body: string }): string {
+function formatPercentage(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(value);
+}
+
+function renderShell(params: { title: string; body: string; language: string }): string {
   return `<!DOCTYPE html>
-  <html lang="en">
+  <html lang="${escapeHtml(params.language)}">
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />

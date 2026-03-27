@@ -79,7 +79,9 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
           const transcriptPath = this.currentSnapshot?.session.jsonlPath;
           if (!transcriptPath) {
             void vscode.window.showInformationMessage(
-              "No Claude transcript is available for the current workspace yet."
+              vscode.l10n.t(
+                "No Claude transcript is available for the current workspace yet."
+              )
             );
             return;
           }
@@ -150,7 +152,9 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
       }
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unknown error while reading Claude logs.";
+        error instanceof Error
+          ? error.message
+          : vscode.l10n.t("Unknown error while reading Claude logs.");
       this.statusBar.showPlaceholder(message);
     } finally {
       this.refreshInFlight = false;
@@ -164,7 +168,7 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
   }
 
   private async refreshFromDiscovery(): Promise<void> {
-    this.statusBar.showLoading("Scanning Claude Code sessions...");
+    this.statusBar.showLoading(vscode.l10n.t("Scanning Claude Code sessions..."));
 
     const discovery = await discoverCurrentSession({
       dataDirectory: this.getConfiguration().dataDirectory,
@@ -178,7 +182,9 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
       this.currentSnapshot = null;
       this.reconfigureActiveSessionWatcher(null);
       this.statusBar.showPlaceholder(
-        "Claude data directory was not found. Configure claudeReplyTokens.dataDirectory if needed."
+        vscode.l10n.t(
+          "Claude data directory was not found. Configure claudeReplyTokens.dataDirectory if needed."
+        )
       );
       return;
     }
@@ -187,7 +193,7 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
       this.currentSnapshot = null;
       this.reconfigureActiveSessionWatcher(null);
       this.statusBar.showPlaceholder(
-        "No Claude reply data matches the current workspace yet."
+        vscode.l10n.t("No Claude reply data matches the current workspace yet.")
       );
       return;
     }
@@ -226,7 +232,7 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
   private updateStatusBarFromSnapshot(): void {
     if (!this.currentSnapshot) {
       this.statusBar.showPlaceholder(
-        "No Claude reply data matches the current workspace yet."
+        vscode.l10n.t("No Claude reply data matches the current workspace yet.")
       );
       this.refreshAnalysisPanel();
       return;
@@ -235,7 +241,9 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
     const turnUsage = computeLatestTurnUsage(this.currentSnapshot);
     if (!turnUsage) {
       this.statusBar.showPlaceholder(
-        "Claude session found, but there is no completed assistant reply with usage data yet."
+        vscode.l10n.t(
+          "Claude session found, but there is no completed assistant reply with usage data yet."
+        )
       );
       this.refreshAnalysisPanel();
       return;
@@ -252,7 +260,9 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
 
     if (!analysis) {
       void vscode.window.showInformationMessage(
-        "No completed Claude turn is available for the current workspace yet."
+        vscode.l10n.t(
+          "No completed Claude turn is available for the current workspace yet."
+        )
       );
       return;
     }
@@ -260,7 +270,7 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
     if (!this.analysisPanel) {
       this.analysisPanel = vscode.window.createWebviewPanel(
         "claudeReplyTokens.turnAnalysis",
-        "Claude Turn Analysis",
+        vscode.l10n.t("Claude Turn Analysis"),
         vscode.ViewColumn.Beside,
         {
           enableCommandUris: true

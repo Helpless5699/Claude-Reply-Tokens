@@ -46,17 +46,17 @@ function formatCompactNumber(value: number): string {
   return value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-export function formatExactTokens(value: number): string {
-  return new Intl.NumberFormat("en-US").format(Math.round(value));
+export function formatExactTokens(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale).format(Math.round(value));
 }
 
-export function formatLocalDateTime(timestamp: string): string {
+export function formatLocalDateTime(timestamp: string, locale?: string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
     return timestamp;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "medium"
   }).format(date);

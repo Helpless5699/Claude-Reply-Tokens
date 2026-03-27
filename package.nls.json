@@ -1,0 +1,12 @@
+{
+  "extension.displayName": "Claude Reply Tokens",
+  "extension.description": "Show token usage for the latest Claude Code reply in the VS Code status bar.",
+  "command.category": "Claude Reply Tokens",
+  "command.refresh.title": "Refresh Claude Reply Tokens",
+  "command.openTurnAnalysis.title": "Open Latest Claude Turn Analysis",
+  "command.openTranscript.title": "Open Claude Transcript",
+  "command.openSettings.title": "Open Claude Reply Tokens Settings",
+  "configuration.title": "Claude Reply Tokens",
+  "configuration.dataDirectory.description": "Claude config directory override. Point this at the folder that contains the projects subdirectory.",
+  "configuration.refreshIntervalSeconds.description": "Fallback full-rescan interval in seconds."
+}

@@ -16,7 +16,9 @@ export class StatusBarController {
     );
     this.item.command = "claudeReplyTokens.openTurnAnalysis";
     this.item.text = "Claude -- tok";
-    this.item.tooltip = "Waiting for Claude Code reply data. Click to open the latest turn analysis.";
+    this.item.tooltip = vscode.l10n.t(
+      "Waiting for Claude Code reply data. Click to open the latest turn analysis."
+    );
     this.item.show();
   }
 
@@ -26,36 +28,57 @@ export class StatusBarController {
   }
 
   public showUsage(turnUsage: TurnUsage): void {
+    const locale = vscode.env.language;
     this.item.text = `Claude ${formatCompactTokens(turnUsage.breakdown.totalTokens)} tok`;
 
     const tooltip = new vscode.MarkdownString(undefined, true);
-    tooltip.appendMarkdown("**Claude Reply Tokens**\n\n");
+    tooltip.appendMarkdown(`**${vscode.l10n.t("Claude Reply Tokens")}**\n\n`);
     tooltip.appendMarkdown(
-      `Total: \`${formatExactTokens(turnUsage.breakdown.totalTokens)}\`\n\n`
+      `${vscode.l10n.t("Total")}: \`${formatExactTokens(
+        turnUsage.breakdown.totalTokens,
+        locale
+      )}\`\n\n`
     );
     tooltip.appendMarkdown(
-      `Input: \`${formatExactTokens(turnUsage.breakdown.inputTokens)}\`\n\n`
+      `${vscode.l10n.t("Input")}: \`${formatExactTokens(
+        turnUsage.breakdown.inputTokens,
+        locale
+      )}\`\n\n`
     );
     tooltip.appendMarkdown(
-      `Output: \`${formatExactTokens(turnUsage.breakdown.outputTokens)}\`\n\n`
+      `${vscode.l10n.t("Output")}: \`${formatExactTokens(
+        turnUsage.breakdown.outputTokens,
+        locale
+      )}\`\n\n`
     );
     tooltip.appendMarkdown(
-      `Cache write: \`${formatExactTokens(turnUsage.breakdown.cacheWriteTokens)}\`\n\n`
+      `${vscode.l10n.t("Cache write")}: \`${formatExactTokens(
+        turnUsage.breakdown.cacheWriteTokens,
+        locale
+      )}\`\n\n`
     );
     tooltip.appendMarkdown(
-      `Cache read: \`${formatExactTokens(turnUsage.breakdown.cacheReadTokens)}\`\n\n`
+      `${vscode.l10n.t("Cache read")}: \`${formatExactTokens(
+        turnUsage.breakdown.cacheReadTokens,
+        locale
+      )}\`\n\n`
     );
-    tooltip.appendMarkdown(`Model: \`${turnUsage.model}\`\n\n`);
+    tooltip.appendMarkdown(`${vscode.l10n.t("Model")}: \`${turnUsage.model}\`\n\n`);
     tooltip.appendMarkdown(
-      `Updated: \`${formatLocalDateTime(turnUsage.timestamp)}\`\n\n`
+      `${vscode.l10n.t("Updated")}: \`${formatLocalDateTime(
+        turnUsage.timestamp,
+        locale
+      )}\`\n\n`
     );
-    tooltip.appendMarkdown(`Session: \`${turnUsage.sessionId}\`\n\n`);
-    tooltip.appendMarkdown(`Transcript: \`${turnUsage.transcriptPath}\`\n\n`);
+    tooltip.appendMarkdown(`${vscode.l10n.t("Session")}: \`${turnUsage.sessionId}\`\n\n`);
     tooltip.appendMarkdown(
-      "[Open turn analysis](command:claudeReplyTokens.openTurnAnalysis) | "
+      `${vscode.l10n.t("Transcript")}: \`${turnUsage.transcriptPath}\`\n\n`
     );
     tooltip.appendMarkdown(
-      "[Open transcript](command:claudeReplyTokens.openTranscript)"
+      `[${vscode.l10n.t("Open turn analysis")}](command:claudeReplyTokens.openTurnAnalysis) | `
+    );
+    tooltip.appendMarkdown(
+      `[${vscode.l10n.t("Open transcript")}](command:claudeReplyTokens.openTranscript)`
     );
     tooltip.isTrusted = true;
 
@@ -64,7 +87,10 @@ export class StatusBarController {
 
   public showPlaceholder(message: string): void {
     this.item.text = "Claude -- tok";
-    this.item.tooltip = `${message} Click to open the latest turn analysis when data is ready.`;
+    this.item.tooltip = vscode.l10n.t(
+      "{0} Click to open the latest turn analysis when data is ready.",
+      message
+    );
   }
 
   public dispose(): void {
