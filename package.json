@@ -3,7 +3,7 @@
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
   "icon": "icon.png",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "helpless5699",
   "license": "MIT",
   "repository": {
