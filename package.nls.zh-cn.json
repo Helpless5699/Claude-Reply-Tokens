@@ -1,12 +1,12 @@
 {
-  "extension.displayName": "Claude 回复 Token 用量",
+  "extension.displayName": "Claude Reply Tokens",
   "extension.description": "在 VS Code 状态栏中显示最近一次 Claude Code 回复的 Token 用量。",
-  "command.category": "Claude 回复 Token 用量",
-  "command.refresh.title": "刷新 Claude 回复 Token 用量",
+  "command.category": "Claude Reply Tokens",
+  "command.refresh.title": "刷新 Claude Reply Tokens",
   "command.openTurnAnalysis.title": "打开最近一次 Claude 轮次分析",
-  "command.openTranscript.title": "打开 Claude 转录日志",
-  "command.openSettings.title": "打开 Claude 回复 Token 用量设置",
-  "configuration.title": "Claude 回复 Token 用量",
-  "configuration.dataDirectory.description": "覆盖 Claude 配置目录。请将其指向包含 projects 子目录的文件夹。",
-  "configuration.refreshIntervalSeconds.description": "兜底的全量重新扫描间隔，单位为秒。"
+  "command.openTranscript.title": "打开 Claude 对话记录",
+  "command.openSettings.title": "打开 Claude Reply Tokens 设置",
+  "configuration.title": "Claude Reply Tokens",
+  "configuration.dataDirectory.description": "自定义 Claude 配置目录。请将它指向包含 `projects` 子目录的文件夹。",
+  "configuration.refreshIntervalSeconds.description": "兜底全量扫描间隔，单位为秒。"
 }
