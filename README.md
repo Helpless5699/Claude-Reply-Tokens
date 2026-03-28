@@ -11,6 +11,7 @@ It does not depend on private APIs from the official `anthropic.claude-code` ext
 - Matches Claude sessions to the current workspace
 - Refreshes automatically when Claude writes new transcript lines
 - Opens a latest-turn analysis panel from the status bar
+- Shows rolling cumulative usage for the current workspace (`1h / 1d / 3d / 7d / 30d`)
 - Keeps the matching transcript available as a separate command
 
 ## How It Works
@@ -27,6 +28,7 @@ The total includes:
 Clicking the status bar opens a latest-turn analysis panel that shows:
 
 - Exact token buckets for the turn (`input / output / cache write / cache read`)
+- Rolling cumulative token usage for the current workspace (`1h / 1d / 3d / 7d / 30d`)
 - A heuristic content mix by message-block category (`user text / tool result / assistant tool use / assistant thinking / assistant text`)
 - Per-assistant-step totals so you can see which call in the turn was expensive
 

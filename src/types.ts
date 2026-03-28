@@ -84,12 +84,74 @@ export type TurnContentCategory =
   | "assistantText"
   | "other";
 
+export type PromptSourceKind =
+  | "systemPrompt"
+  | "skills"
+  | "claudeMd"
+  | "environment"
+  | "builtInTools"
+  | "mcpTools";
+
 export interface ContentMetric {
   chars: number;
   blocks: number;
 }
 
 export type ContentMetrics = Record<TurnContentCategory, ContentMetric>;
+
+export interface ClaudeTelemetryEvent {
+  name: string;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+  skillName?: string;
+}
+
+export interface ClaudeInstructionLoadBreakdown {
+  fileCount: number;
+  totalContentLength: number;
+  userCount: number;
+  projectCount: number;
+  localCount: number;
+  managedCount: number;
+  automemCount: number;
+  teammemCount: number;
+}
+
+export interface PromptSourceBreakdown {
+  systemPrompt: number;
+  skills: number;
+  claudeMd: number;
+  environment: number;
+  builtInTools: number;
+  mcpTools: number;
+}
+
+export interface PromptSourceAnalysis {
+  promptCount: number;
+  totalKnownValue: number;
+  breakdown: PromptSourceBreakdown;
+  dominantSource: PromptSourceKind | null;
+  instructionLoads: ClaudeInstructionLoadBreakdown | null;
+  hasConversationGap: boolean;
+}
+
+export type RecentUsageWindowKey = "1h" | "1d" | "3d" | "7d" | "30d";
+
+export interface RecentUsageWindowAnalysis {
+  key: RecentUsageWindowKey;
+  label: string;
+  startedAt: string;
+  breakdown: UsageBreakdown;
+  dominantTokenBucket: TokenBucketKind | null;
+  assistantCalls: number;
+  sessionCount: number;
+}
+
+export interface WorkspaceRecentUsageSummary {
+  scopePath: string;
+  generatedAt: string;
+  windows: RecentUsageWindowAnalysis[];
+}
 
 export interface SessionMatch {
   sessionId: string;
@@ -126,6 +188,7 @@ export interface TurnAnalysis {
   transcriptPath: string;
   breakdown: UsageBreakdown;
   dominantTokenBucket: TokenBucketKind | null;
+  promptSources: PromptSourceAnalysis | null;
   contentMetrics: ContentMetrics;
   dominantContentCategory: TurnContentCategory | null;
   steps: AssistantStepAnalysis[];
@@ -135,6 +198,7 @@ export interface TurnAnalysis {
 export interface SessionSnapshot {
   session: SessionMatch;
   records: ClaudeRecord[];
+  telemetryEvents: ClaudeTelemetryEvent[];
   offset: number;
   trailingPartial: string;
 }

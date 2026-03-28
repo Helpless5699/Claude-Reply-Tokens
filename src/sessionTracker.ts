@@ -4,9 +4,16 @@ import * as path from "node:path";
 import {
   AssistantStepAnalysis,
   ClaudeRecord,
+  ClaudeTelemetryEvent,
   ClaudeToolUseContentBlock,
   ClaudeUsage,
+  ClaudeInstructionLoadBreakdown,
   ContentMetrics,
+  PromptSourceAnalysis,
+  PromptSourceBreakdown,
+  PromptSourceKind,
+  RecentUsageWindowAnalysis,
+  RecentUsageWindowKey,
   SessionDiscovery,
   SessionMatch,
   SessionSnapshot,
@@ -15,7 +22,8 @@ import {
   TurnContentCategory,
   TrackerConfig,
   TurnUsage,
-  UsageBreakdown
+  UsageBreakdown,
+  WorkspaceRecentUsageSummary
 } from "./types";
 import { normalizeFsPath, workspaceMatchesCwd } from "./utils";
 
@@ -32,6 +40,66 @@ interface LatestTurnRecords {
   latestAssistant: CountableAssistantRecord;
   records: ClaudeRecord[];
 }
+
+interface RawClaudeTelemetryRecord {
+  event_type?: string;
+  event_data?: {
+    event_name?: string;
+    client_timestamp?: string;
+    session_id?: string;
+    additional_metadata?: unknown;
+  };
+  skill_name?: string;
+}
+
+interface PromptTelemetryContextSize {
+  gitStatusSize: number;
+  claudeMdSize: number;
+  nonMcpToolsTokens: number;
+  mcpToolsTokens: number;
+}
+
+interface PromptTelemetryCycle {
+  startedAt: string;
+  systemPromptLengths: Map<string, number>;
+  skillBudgets: Map<string, number>;
+  contextSize: PromptTelemetryContextSize;
+  instructionLoads: ClaudeInstructionLoadBreakdown | null;
+}
+
+interface RecentUsageWindowDefinition {
+  key: RecentUsageWindowKey;
+  label: string;
+  durationMs: number;
+}
+
+const RECENT_USAGE_WINDOWS: RecentUsageWindowDefinition[] = [
+  {
+    key: "1h",
+    label: "Last 1 hour",
+    durationMs: 60 * 60 * 1000
+  },
+  {
+    key: "1d",
+    label: "Last 1 day",
+    durationMs: 24 * 60 * 60 * 1000
+  },
+  {
+    key: "3d",
+    label: "Last 3 days",
+    durationMs: 3 * 24 * 60 * 60 * 1000
+  },
+  {
+    key: "7d",
+    label: "Last 7 days",
+    durationMs: 7 * 24 * 60 * 60 * 1000
+  },
+  {
+    key: "30d",
+    label: "Last 30 days",
+    durationMs: 30 * 24 * 60 * 60 * 1000
+  }
+];
 
 export async function discoverCurrentSession(
   config: TrackerConfig
@@ -87,12 +155,86 @@ export async function loadSessionSnapshot(
   const content = await fs.readFile(session.jsonlPath, DEFAULT_REFRESH_ENCODING);
   const stats = await fs.stat(session.jsonlPath);
   const { records, trailingPartial } = parseJsonlText(content);
+  const telemetryEvents = await loadTelemetryEvents(session);
 
   return {
     session,
     records,
+    telemetryEvents,
     offset: stats.size,
     trailingPartial
+  };
+}
+
+export async function computeWorkspaceRecentUsageSummary(params: {
+  dataDirectory?: string;
+  workspacePath: string;
+  now?: Date;
+}): Promise<WorkspaceRecentUsageSummary | null> {
+  const claudeRoots = await getClaudeRoots(params.dataDirectory);
+  if (claudeRoots.length === 0) {
+    return null;
+  }
+
+  const matchingSessions: SessionMatch[] = [];
+  for (const claudeRoot of claudeRoots) {
+    const projectsPath = path.join(claudeRoot, PROJECTS_DIR_NAME);
+    const jsonlFiles = await findJsonlFiles(projectsPath);
+    if (jsonlFiles.length === 0) {
+      continue;
+    }
+
+    const candidates = await Promise.all(
+      jsonlFiles.map(async (jsonlPath) => summarizeSessionFile(jsonlPath))
+    );
+    for (const candidate of candidates) {
+      if (
+        candidate &&
+        workspaceMatchesCwd(params.workspacePath, candidate.cwd)
+      ) {
+        matchingSessions.push(candidate);
+      }
+    }
+  }
+
+  if (matchingSessions.length === 0) {
+    return null;
+  }
+
+  const now = params.now ?? new Date();
+  const windows = RECENT_USAGE_WINDOWS.map((window) =>
+    createRecentUsageWindow(window, now)
+  );
+  const sessionSets = windows.map(() => new Set<string>());
+
+  await Promise.all(
+    matchingSessions.map(async (session) => {
+      let content: string;
+      try {
+        content = await fs.readFile(session.jsonlPath, DEFAULT_REFRESH_ENCODING);
+      } catch {
+        return;
+      }
+
+      const parsed = parseJsonlText(content);
+      accumulateRecentUsageRecords(
+        parsed.records,
+        session.sessionId,
+        now,
+        windows,
+        sessionSets
+      );
+    })
+  );
+
+  return {
+    scopePath: params.workspacePath,
+    generatedAt: now.toISOString(),
+    windows: windows.map((window, index) => ({
+      ...window,
+      sessionCount: sessionSets[index].size,
+      dominantTokenBucket: findDominantTokenBucket(window.breakdown)
+    }))
   };
 }
 
@@ -105,7 +247,10 @@ export async function refreshSessionSnapshot(
   }
 
   if (stats.size === snapshot.offset) {
-    return snapshot;
+    return {
+      ...snapshot,
+      telemetryEvents: await loadTelemetryEvents(snapshot.session)
+    };
   }
 
   const fileHandle = await fs.open(snapshot.session.jsonlPath, "r");
@@ -114,10 +259,12 @@ export async function refreshSessionSnapshot(
     await fileHandle.read(buffer, 0, buffer.length, snapshot.offset);
     const appendedText = buffer.toString(DEFAULT_REFRESH_ENCODING);
     const parsed = parseJsonlText(`${snapshot.trailingPartial}${appendedText}`);
+    const telemetryEvents = await loadTelemetryEvents(snapshot.session);
 
     return {
       session: snapshot.session,
       records: snapshot.records.concat(parsed.records),
+      telemetryEvents,
       offset: stats.size,
       trailingPartial: parsed.trailingPartial
     };
@@ -193,6 +340,7 @@ export function computeLatestTurnAnalysis(
     transcriptPath: snapshot.session.jsonlPath,
     breakdown,
     dominantTokenBucket: findDominantTokenBucket(breakdown),
+    promptSources: analyzePromptSources(snapshot.telemetryEvents, steps),
     contentMetrics,
     dominantContentCategory: findDominantContentCategory(contentMetrics),
     steps,
@@ -210,6 +358,21 @@ export function emptyBreakdown(): UsageBreakdown {
   };
 }
 
+function createRecentUsageWindow(
+  window: RecentUsageWindowDefinition,
+  now: Date
+): RecentUsageWindowAnalysis {
+  return {
+    key: window.key,
+    label: window.label,
+    startedAt: new Date(now.getTime() - window.durationMs).toISOString(),
+    breakdown: emptyBreakdown(),
+    dominantTokenBucket: null,
+    assistantCalls: 0,
+    sessionCount: 0
+  };
+}
+
 function accumulateUsage(breakdown: UsageBreakdown, usage: ClaudeUsage): void {
   const inputTokens = usage.input_tokens ?? 0;
   const outputTokens = usage.output_tokens ?? 0;
@@ -222,6 +385,38 @@ function accumulateUsage(breakdown: UsageBreakdown, usage: ClaudeUsage): void {
   breakdown.cacheReadTokens += cacheReadTokens;
   breakdown.totalTokens +=
     inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens;
+}
+
+function accumulateRecentUsageRecords(
+  records: ClaudeRecord[],
+  sessionId: string,
+  now: Date,
+  windows: RecentUsageWindowAnalysis[],
+  sessionSets: Array<Set<string>>
+): void {
+  const nowMs = now.getTime();
+
+  for (const record of records) {
+    if (!isCountableAssistant(record) || !record.timestamp) {
+      continue;
+    }
+
+    const timestampMs = Date.parse(record.timestamp);
+    if (Number.isNaN(timestampMs) || timestampMs > nowMs) {
+      continue;
+    }
+
+    for (let index = 0; index < RECENT_USAGE_WINDOWS.length; index += 1) {
+      const windowDefinition = RECENT_USAGE_WINDOWS[index];
+      if (timestampMs < nowMs - windowDefinition.durationMs) {
+        continue;
+      }
+
+      accumulateUsage(windows[index].breakdown, record.message!.usage!);
+      windows[index].assistantCalls += 1;
+      sessionSets[index].add(sessionId);
+    }
+  }
 }
 
 function emptyContentMetrics(): ContentMetrics {
@@ -519,6 +714,253 @@ function findDominantTokenBucket(
   return dominant[1] > 0 ? dominant[0] : null;
 }
 
+function analyzePromptSources(
+  telemetryEvents: ClaudeTelemetryEvent[],
+  steps: AssistantStepAnalysis[]
+): PromptSourceAnalysis | null {
+  const cycles = buildPromptTelemetryCycles(telemetryEvents);
+  if (cycles.length === 0) {
+    return null;
+  }
+
+  const selectedCycles = new Set<number>();
+  for (const step of steps) {
+    const cycleIndex = findCycleIndexForTimestamp(cycles, step.timestamp);
+    if (cycleIndex >= 0) {
+      selectedCycles.add(cycleIndex);
+    }
+  }
+
+  if (selectedCycles.size === 0) {
+    return null;
+  }
+
+  const breakdown: PromptSourceBreakdown = {
+    systemPrompt: 0,
+    skills: 0,
+    claudeMd: 0,
+    environment: 0,
+    builtInTools: 0,
+    mcpTools: 0
+  };
+  let promptCount = 0;
+  let instructionLoads: ClaudeInstructionLoadBreakdown | null = null;
+
+  for (const cycleIndex of Array.from(selectedCycles.values()).sort((left, right) => left - right)) {
+    const cycle = cycles[cycleIndex];
+    promptCount += 1;
+
+    breakdown.systemPrompt += sumValues(cycle.systemPromptLengths);
+    breakdown.skills += sumValues(cycle.skillBudgets);
+    breakdown.claudeMd += cycle.contextSize.claudeMdSize;
+    breakdown.environment += cycle.contextSize.gitStatusSize;
+    breakdown.builtInTools += cycle.contextSize.nonMcpToolsTokens;
+    breakdown.mcpTools += cycle.contextSize.mcpToolsTokens;
+
+    if (cycle.instructionLoads) {
+      instructionLoads = mergeInstructionLoads(instructionLoads, cycle.instructionLoads);
+    }
+  }
+
+  const totalKnownValue =
+    breakdown.systemPrompt +
+    breakdown.skills +
+    breakdown.claudeMd +
+    breakdown.environment +
+    breakdown.builtInTools +
+    breakdown.mcpTools;
+
+  if (totalKnownValue <= 0 && !instructionLoads) {
+    return null;
+  }
+
+  return {
+    promptCount,
+    totalKnownValue,
+    breakdown,
+    dominantSource: findDominantPromptSource(breakdown),
+    instructionLoads,
+    hasConversationGap: true
+  };
+}
+
+function buildPromptTelemetryCycles(
+  telemetryEvents: ClaudeTelemetryEvent[]
+): PromptTelemetryCycle[] {
+  const events = telemetryEvents
+    .filter((event) => Date.parse(event.timestamp) > 0)
+    .sort(
+      (left, right) =>
+        new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+    );
+
+  if (events.length === 0) {
+    return [];
+  }
+
+  const cycles: PromptTelemetryCycle[] = [];
+  let currentCycle: PromptTelemetryCycle | null = null;
+
+  for (const event of events) {
+    if (event.name === "tengu_input_prompt") {
+      if (currentCycle) {
+        cycles.push(currentCycle);
+      }
+
+      currentCycle = createPromptTelemetryCycle(event.timestamp);
+      continue;
+    }
+
+    if (!currentCycle) {
+      currentCycle = createPromptTelemetryCycle(event.timestamp);
+    }
+
+    applyTelemetryEvent(currentCycle, event);
+  }
+
+  if (currentCycle) {
+    cycles.push(currentCycle);
+  }
+
+  return cycles;
+}
+
+function createPromptTelemetryCycle(timestamp: string): PromptTelemetryCycle {
+  return {
+    startedAt: timestamp,
+    systemPromptLengths: new Map<string, number>(),
+    skillBudgets: new Map<string, number>(),
+    contextSize: {
+      gitStatusSize: 0,
+      claudeMdSize: 0,
+      nonMcpToolsTokens: 0,
+      mcpToolsTokens: 0
+    },
+    instructionLoads: null
+  };
+}
+
+function applyTelemetryEvent(
+  cycle: PromptTelemetryCycle,
+  event: ClaudeTelemetryEvent
+): void {
+  switch (event.name) {
+    case "tengu_sysprompt_block": {
+      const length = numberMetadata(event.metadata, "length");
+      if (length <= 0) {
+        return;
+      }
+
+      const hash = stringMetadata(event.metadata, "hash") ?? `${event.timestamp}:${cycle.systemPromptLengths.size}`;
+      cycle.systemPromptLengths.set(
+        hash,
+        Math.max(cycle.systemPromptLengths.get(hash) ?? 0, length)
+      );
+      return;
+    }
+    case "tengu_skill_loaded": {
+      const skillBudget = numberMetadata(event.metadata, "skill_budget");
+      if (skillBudget <= 0) {
+        return;
+      }
+
+      const skillName = event.skillName ?? `${event.timestamp}:${cycle.skillBudgets.size}`;
+      cycle.skillBudgets.set(
+        skillName,
+        Math.max(cycle.skillBudgets.get(skillName) ?? 0, skillBudget)
+      );
+      return;
+    }
+    case "tengu_context_size":
+      cycle.contextSize = {
+        gitStatusSize: numberMetadata(event.metadata, "git_status_size"),
+        claudeMdSize: numberMetadata(event.metadata, "claude_md_size"),
+        nonMcpToolsTokens: numberMetadata(event.metadata, "non_mcp_tools_tokens"),
+        mcpToolsTokens: numberMetadata(event.metadata, "mcp_tools_tokens")
+      };
+      return;
+    case "tengu_claudemd__initial_load":
+      cycle.instructionLoads = {
+        fileCount: numberMetadata(event.metadata, "file_count"),
+        totalContentLength: numberMetadata(event.metadata, "total_content_length"),
+        userCount: numberMetadata(event.metadata, "user_count"),
+        projectCount: numberMetadata(event.metadata, "project_count"),
+        localCount: numberMetadata(event.metadata, "local_count"),
+        managedCount: numberMetadata(event.metadata, "managed_count"),
+        automemCount: numberMetadata(event.metadata, "automem_count"),
+        teammemCount: numberMetadata(event.metadata, "teammem_count")
+      };
+      return;
+    default:
+      return;
+  }
+}
+
+function findCycleIndexForTimestamp(
+  cycles: PromptTelemetryCycle[],
+  timestamp: string
+): number {
+  const targetTime = Date.parse(timestamp);
+  if (Number.isNaN(targetTime)) {
+    return -1;
+  }
+
+  for (let index = cycles.length - 1; index >= 0; index -= 1) {
+    if (Date.parse(cycles[index].startedAt) <= targetTime) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function mergeInstructionLoads(
+  current: ClaudeInstructionLoadBreakdown | null,
+  next: ClaudeInstructionLoadBreakdown
+): ClaudeInstructionLoadBreakdown {
+  if (!current) {
+    return { ...next };
+  }
+
+  return {
+    fileCount: current.fileCount + next.fileCount,
+    totalContentLength: current.totalContentLength + next.totalContentLength,
+    userCount: current.userCount + next.userCount,
+    projectCount: current.projectCount + next.projectCount,
+    localCount: current.localCount + next.localCount,
+    managedCount: current.managedCount + next.managedCount,
+    automemCount: current.automemCount + next.automemCount,
+    teammemCount: current.teammemCount + next.teammemCount
+  };
+}
+
+function findDominantPromptSource(
+  breakdown: PromptSourceBreakdown
+): PromptSourceKind | null {
+  const candidates: Array<[PromptSourceKind, number]> = [
+    ["systemPrompt", breakdown.systemPrompt],
+    ["skills", breakdown.skills],
+    ["claudeMd", breakdown.claudeMd],
+    ["environment", breakdown.environment],
+    ["builtInTools", breakdown.builtInTools],
+    ["mcpTools", breakdown.mcpTools]
+  ];
+  const dominant = candidates.reduce((best, current) =>
+    current[1] > best[1] ? current : best
+  );
+
+  return dominant[1] > 0 ? dominant[0] : null;
+}
+
+function sumValues(values: Map<string, number>): number {
+  let total = 0;
+  for (const value of values.values()) {
+    total += value;
+  }
+
+  return total;
+}
+
 function findDominantContentCategory(
   metrics: ContentMetrics
 ): TurnContentCategory | null {
@@ -696,6 +1138,169 @@ async function getClaudeRoots(dataDirectory?: string): Promise<string[]> {
   }
 
   return validRoots;
+}
+
+async function loadTelemetryEvents(
+  session: SessionMatch
+): Promise<ClaudeTelemetryEvent[]> {
+  const telemetryDir = findTelemetryDir(session.jsonlPath);
+  if (!telemetryDir) {
+    return [];
+  }
+
+  let entries;
+  try {
+    entries = await fs.readdir(telemetryDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const candidateFiles = entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.includes(session.sessionId) &&
+        entry.name.endsWith(".json")
+    )
+    .map((entry) => path.join(telemetryDir, entry.name));
+
+  const loaded = await Promise.all(candidateFiles.map((filePath) => readTelemetryFile(filePath, session.sessionId)));
+  return loaded.flat().sort(
+    (left, right) =>
+      new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime()
+  );
+}
+
+async function readTelemetryFile(
+  filePath: string,
+  sessionId: string
+): Promise<ClaudeTelemetryEvent[]> {
+  let content: string;
+  try {
+    content = await fs.readFile(filePath, DEFAULT_REFRESH_ENCODING);
+  } catch {
+    return [];
+  }
+
+  const events: ClaudeTelemetryEvent[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const event = parseTelemetryLine(line, sessionId);
+    if (event) {
+      events.push(event);
+    }
+  }
+
+  return events;
+}
+
+function parseTelemetryLine(
+  line: string,
+  sessionId: string
+): ClaudeTelemetryEvent | null {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  let parsed: RawClaudeTelemetryRecord;
+  try {
+    parsed = JSON.parse(trimmed) as RawClaudeTelemetryRecord;
+  } catch {
+    return null;
+  }
+
+  const eventData = parsed.event_data;
+  if (
+    !eventData ||
+    eventData.session_id !== sessionId ||
+    typeof eventData.event_name !== "string" ||
+    typeof eventData.client_timestamp !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    name: eventData.event_name,
+    timestamp: eventData.client_timestamp,
+    metadata: decodeTelemetryMetadata(eventData.additional_metadata),
+    skillName: typeof parsed.skill_name === "string" ? parsed.skill_name : undefined
+  };
+}
+
+function decodeTelemetryMetadata(value: unknown): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  if (typeof value !== "string") {
+    return {};
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return {};
+  }
+
+  const decodedCandidates = [trimmed];
+  try {
+    decodedCandidates.push(Buffer.from(trimmed, "base64").toString("utf8"));
+  } catch {
+    // Ignore base64 decode failures.
+  }
+
+  for (const candidate of decodedCandidates) {
+    if (!candidate.startsWith("{") || !candidate.endsWith("}")) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Ignore invalid metadata payloads.
+    }
+  }
+
+  return {};
+}
+
+function numberMetadata(
+  metadata: Record<string, unknown>,
+  key: string
+): number {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function stringMetadata(
+  metadata: Record<string, unknown>,
+  key: string
+): string | undefined {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function findTelemetryDir(jsonlPath: string): string | null {
+  let current = path.dirname(jsonlPath);
+
+  while (true) {
+    if (path.basename(current).toLowerCase() === PROJECTS_DIR_NAME) {
+      return path.join(path.dirname(current), "telemetry");
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+
+    current = parent;
+  }
 }
 
 async function findJsonlFiles(rootPath: string): Promise<string[]> {

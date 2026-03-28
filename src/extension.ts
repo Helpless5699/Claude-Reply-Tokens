@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { renderTurnAnalysisWebview } from "./analysisView";
 import {
+  computeWorkspaceRecentUsageSummary,
   computeLatestTurnAnalysis,
   computeLatestTurnUsage,
   discoverCurrentSession,
@@ -9,7 +10,7 @@ import {
   refreshSessionSnapshot
 } from "./sessionTracker";
 import { StatusBarController } from "./statusBar";
-import { SessionSnapshot } from "./types";
+import { SessionSnapshot, WorkspaceRecentUsageSummary } from "./types";
 import { debounce } from "./utils";
 
 const CONFIG_SECTION = "claudeReplyTokens";
@@ -30,6 +31,7 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
   private refreshTimer: NodeJS.Timeout | null = null;
   private refreshInFlight = false;
   private queuedMode: "incremental" | "full" | null = null;
+  private analysisRenderNonce = 0;
 
   public constructor(private readonly context: vscode.ExtensionContext) {
     this.debouncedIncrementalRefresh = debounce(() => {
@@ -250,13 +252,11 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
     }
 
     this.statusBar.showUsage(turnUsage);
-    this.refreshAnalysisPanel();
+    void this.refreshAnalysisPanel();
   }
 
   private async openTurnAnalysis(): Promise<void> {
-    const analysis = this.currentSnapshot
-      ? computeLatestTurnAnalysis(this.currentSnapshot)
-      : null;
+    const { analysis, recentUsage } = await this.buildAnalysisPanelData();
 
     if (!analysis) {
       void vscode.window.showInformationMessage(
@@ -283,18 +283,29 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
       this.analysisPanel.reveal(vscode.ViewColumn.Beside, false);
     }
 
-    this.analysisPanel.webview.html = renderTurnAnalysisWebview(analysis);
+    this.analysisPanel.webview.html = renderTurnAnalysisWebview(
+      analysis,
+      recentUsage
+    );
   }
 
-  private refreshAnalysisPanel(): void {
+  private async refreshAnalysisPanel(): Promise<void> {
     if (!this.analysisPanel) {
       return;
     }
 
-    const analysis = this.currentSnapshot
-      ? computeLatestTurnAnalysis(this.currentSnapshot)
-      : null;
-    this.analysisPanel.webview.html = renderTurnAnalysisWebview(analysis);
+    const renderNonce = this.analysisRenderNonce + 1;
+    this.analysisRenderNonce = renderNonce;
+
+    const { analysis, recentUsage } = await this.buildAnalysisPanelData();
+    if (!this.analysisPanel || this.analysisRenderNonce !== renderNonce) {
+      return;
+    }
+
+    this.analysisPanel.webview.html = renderTurnAnalysisWebview(
+      analysis,
+      recentUsage
+    );
   }
 
   private reconfigureProjectsWatcher(projectsPath: string | null): void {
@@ -395,6 +406,37 @@ class ClaudeReplyTokensExtension implements vscode.Disposable {
     }
 
     return vscode.workspace.getWorkspaceFolder(activeUri)?.uri.fsPath;
+  }
+
+  private async buildAnalysisPanelData(): Promise<{
+    analysis: ReturnType<typeof computeLatestTurnAnalysis>;
+    recentUsage: WorkspaceRecentUsageSummary | null;
+  }> {
+    const analysis = this.currentSnapshot
+      ? computeLatestTurnAnalysis(this.currentSnapshot)
+      : null;
+
+    if (!analysis || !this.currentSnapshot) {
+      return {
+        analysis,
+        recentUsage: null
+      };
+    }
+
+    let recentUsage: WorkspaceRecentUsageSummary | null = null;
+    try {
+      recentUsage = await computeWorkspaceRecentUsageSummary({
+        dataDirectory: this.getConfiguration().dataDirectory,
+        workspacePath: this.currentSnapshot.session.cwd
+      });
+    } catch {
+      recentUsage = null;
+    }
+
+    return {
+      analysis,
+      recentUsage
+    };
   }
 }
 

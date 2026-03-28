@@ -2,9 +2,13 @@ import * as vscode from "vscode";
 import {
   ContentMetric,
   ContentMetrics,
+  PromptSourceAnalysis,
+  PromptSourceKind,
+  RecentUsageWindowAnalysis,
   TokenBucketKind,
   TurnAnalysis,
-  TurnContentCategory
+  TurnContentCategory,
+  WorkspaceRecentUsageSummary
 } from "./types";
 import {
   formatCompactTokens,
@@ -13,7 +17,8 @@ import {
 } from "./utils";
 
 export function renderTurnAnalysisWebview(
-  analysis: TurnAnalysis | null
+  analysis: TurnAnalysis | null,
+  recentUsage: WorkspaceRecentUsageSummary | null = null
 ): string {
   const locale = vscode.env.language || "en";
 
@@ -35,6 +40,8 @@ export function renderTurnAnalysisWebview(
   }
 
   const tokenRows = renderTokenRows(analysis, locale);
+  const recentUsageSection = renderRecentUsageSection(recentUsage, locale);
+  const promptSources = renderPromptSourceCard(analysis, locale);
   const contentRows = renderContentRows(analysis.contentMetrics, locale);
   const stepRows = analysis.steps.map((step, index) => {
     const stepSummary = describeAssistantStep(step.kinds, step.toolNames);
@@ -92,12 +99,16 @@ export function renderTurnAnalysisWebview(
         </div>
       </header>
 
+      ${recentUsageSection}
+
       <section class="grid">
         <article class="card">
           <h2>${escapeHtml(vscode.l10n.t("Exact Token Buckets"))}</h2>
           <p class="muted">${escapeHtml(dominantTokenText)}</p>
           <div class="rows">${tokenRows}</div>
         </article>
+
+        ${promptSources}
 
         <article class="card">
           <h2>${escapeHtml(vscode.l10n.t("Visible Content Mix"))}</h2>
@@ -204,6 +215,202 @@ function renderContentRows(metrics: ContentMetrics, locale: string): string {
     .join("");
 }
 
+function renderRecentUsageSection(
+  recentUsage: WorkspaceRecentUsageSummary | null,
+  locale: string
+): string {
+  if (!recentUsage) {
+    return `
+      <section class="card">
+        <h2>${escapeHtml(vscode.l10n.t("Recent Cumulative Usage"))}</h2>
+        <p class="muted">${escapeHtml(
+          vscode.l10n.t(
+            "No recent workspace usage was found for the tracked workspace."
+          )
+        )}</p>
+      </section>
+    `;
+  }
+
+  const rows = recentUsage.windows
+    .map((window) => renderRecentUsageRow(window, locale))
+    .join("");
+
+  return `
+    <section class="card">
+      <h2>${escapeHtml(vscode.l10n.t("Recent Cumulative Usage"))}</h2>
+      <p class="muted">${escapeHtml(
+        vscode.l10n.t(
+          "Current workspace only. Sums every assistant call with usage data inside each rolling window."
+        )
+      )}</p>
+      <p class="muted">${escapeHtml(
+        vscode.l10n.t(
+          "Composition columns are exact token buckets. Windows overlap, so 30 days includes 7 days."
+        )
+      )}</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>${escapeHtml(vscode.l10n.t("Window"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Total"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Input"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Output"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Cache write"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Cache read"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Assistant calls"))}</th>
+              <th>${escapeHtml(vscode.l10n.t("Sessions"))}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderRecentUsageRow(
+  window: RecentUsageWindowAnalysis,
+  locale: string
+): string {
+  return `
+    <tr>
+      <td>${escapeHtml(vscode.l10n.t(window.label))}</td>
+      <td>${escapeHtml(formatExactTokens(window.breakdown.totalTokens, locale))}</td>
+      <td>${escapeHtml(formatBreakdownValue(window.breakdown.inputTokens, window.breakdown.totalTokens, locale))}</td>
+      <td>${escapeHtml(formatBreakdownValue(window.breakdown.outputTokens, window.breakdown.totalTokens, locale))}</td>
+      <td>${escapeHtml(formatBreakdownValue(window.breakdown.cacheWriteTokens, window.breakdown.totalTokens, locale))}</td>
+      <td>${escapeHtml(formatBreakdownValue(window.breakdown.cacheReadTokens, window.breakdown.totalTokens, locale))}</td>
+      <td>${escapeHtml(formatExactTokens(window.assistantCalls, locale))}</td>
+      <td>${escapeHtml(formatExactTokens(window.sessionCount, locale))}</td>
+    </tr>
+  `;
+}
+
+function renderPromptSourceCard(
+  analysis: TurnAnalysis,
+  locale: string
+): string {
+  const promptSources = analysis.promptSources;
+  if (!promptSources) {
+    return `
+      <article class="card">
+        <h2>${escapeHtml(vscode.l10n.t("Prompt Source Signals"))}</h2>
+        <p class="muted">${escapeHtml(
+          vscode.l10n.t(
+            "No Claude telemetry context breakdown was found for this turn."
+          )
+        )}</p>
+      </article>
+    `;
+  }
+
+  const dominantPromptSourceText = promptSources.dominantSource
+    ? vscode.l10n.t(
+        "{0} is the largest detectable prompt source in this turn.",
+        promptSourceLabel(promptSources.dominantSource)
+      )
+    : vscode.l10n.t(
+        "No detectable prompt-source signal was recorded for this turn."
+      );
+  const promptSourceRows = renderPromptSourceRows(promptSources, locale);
+  const instructionLoads = promptSources.instructionLoads;
+  const instructionLoadText = instructionLoads
+    ? vscode.l10n.t(
+        "Instruction files loaded across this turn: {fileCount} total | project {projectCount} | user {userCount} | local {localCount} | managed {managedCount} | auto-memory {automemCount} | team-memory {teammemCount}.",
+        {
+          fileCount: instructionLoads.fileCount,
+          projectCount: instructionLoads.projectCount,
+          userCount: instructionLoads.userCount,
+          localCount: instructionLoads.localCount,
+          managedCount: instructionLoads.managedCount,
+          automemCount: instructionLoads.automemCount,
+          teammemCount: instructionLoads.teammemCount
+        }
+      )
+    : vscode.l10n.t("No CLAUDE.md or memory-file load details were exposed.");
+
+  return `
+    <article class="card">
+      <h2>${escapeHtml(vscode.l10n.t("Prompt Source Signals"))}</h2>
+      <p class="muted">${escapeHtml(
+        vscode.l10n.t(
+          "Telemetry-based estimate only. Claude does not expose exact per-source token accounting for a turn, so percentages show relative pressure across detectable sources."
+        )
+      )}</p>
+      <p class="muted">${escapeHtml(
+        vscode.l10n.t(
+          "Aggregated across {promptCount} prompt call(s) in this turn.",
+          { promptCount: promptSources.promptCount }
+        )
+      )}</p>
+      <p class="muted">${escapeHtml(dominantPromptSourceText)}</p>
+      <div class="rows">${promptSourceRows}</div>
+      <p class="muted small-copy">${escapeHtml(
+        vscode.l10n.t(
+          "Units are mixed: `tok` = telemetry tokens, `len` = telemetry-reported length, `budget` = skill budget."
+        )
+      )}</p>
+      <p class="muted small-copy">${escapeHtml(instructionLoadText)}</p>
+      <p class="muted small-copy">${escapeHtml(
+        vscode.l10n.t(
+          "Claude telemetry does not separately expose conversation-body tokens or an exact CLAUDE.md vs memory-file split."
+        )
+      )}</p>
+    </article>
+  `;
+}
+
+function renderPromptSourceRows(
+  promptSources: PromptSourceAnalysis,
+  locale: string
+): string {
+  const total = Math.max(promptSources.totalKnownValue, 1);
+  const rows: Array<{ kind: PromptSourceKind; value: number }> = [
+    {
+      kind: "systemPrompt",
+      value: promptSources.breakdown.systemPrompt
+    },
+    {
+      kind: "skills",
+      value: promptSources.breakdown.skills
+    },
+    {
+      kind: "claudeMd",
+      value: promptSources.breakdown.claudeMd
+    },
+    {
+      kind: "environment",
+      value: promptSources.breakdown.environment
+    },
+    {
+      kind: "builtInTools",
+      value: promptSources.breakdown.builtInTools
+    },
+    {
+      kind: "mcpTools",
+      value: promptSources.breakdown.mcpTools
+    }
+  ];
+
+  return rows
+    .filter((row) => row.value > 0)
+    .sort((left, right) => right.value - left.value)
+    .map((row) =>
+      renderMetricRow(
+        promptSourceLabel(row.kind),
+        row.value,
+        total,
+        promptSourceUnit(row.kind),
+        locale
+      )
+    )
+    .join("");
+}
+
 function sortMetrics(
   metrics: ContentMetrics
 ): Array<[TurnContentCategory, ContentMetric]> {
@@ -245,6 +452,37 @@ function tokenBucketLabel(bucket: TokenBucketKind): string {
       return vscode.l10n.t("Cache write");
     case "cacheReadTokens":
       return vscode.l10n.t("Cache read");
+  }
+}
+
+function promptSourceLabel(kind: PromptSourceKind): string {
+  switch (kind) {
+    case "systemPrompt":
+      return vscode.l10n.t("System prompt");
+    case "skills":
+      return vscode.l10n.t("Skills");
+    case "claudeMd":
+      return vscode.l10n.t("CLAUDE.md / memory files");
+    case "environment":
+      return vscode.l10n.t("Git / environment");
+    case "builtInTools":
+      return vscode.l10n.t("Built-in tools");
+    case "mcpTools":
+      return vscode.l10n.t("MCP tools");
+  }
+}
+
+function promptSourceUnit(kind: PromptSourceKind): string {
+  switch (kind) {
+    case "skills":
+      return vscode.l10n.t("budget");
+    case "builtInTools":
+    case "mcpTools":
+      return vscode.l10n.t("tok");
+    case "systemPrompt":
+    case "claudeMd":
+    case "environment":
+      return vscode.l10n.t("len");
   }
 }
 
@@ -311,6 +549,19 @@ function formatStopReason(stopReason: string | null): string {
     default:
       return stopReason ?? "end_turn";
   }
+}
+
+function formatBreakdownValue(
+  value: number,
+  total: number,
+  locale: string
+): string {
+  const percentage = total > 0 ? (value / total) * 100 : 0;
+  return vscode.l10n.t(
+    "{0} ({1}%)",
+    formatExactTokens(value, locale),
+    formatPercentage(percentage, locale)
+  );
 }
 
 function formatPercentage(value: number, locale: string): string {
@@ -431,6 +682,11 @@ function renderShell(params: { title: string; body: string; language: string }):
           color: var(--muted);
         }
 
+        .small-copy {
+          font-size: 12px;
+          line-height: 1.45;
+        }
+
         .meta {
           display: flex;
           gap: 10px;
@@ -505,6 +761,11 @@ function renderShell(params: { title: string; body: string; language: string }):
         table {
           width: 100%;
           border-collapse: collapse;
+        }
+
+        .table-wrap {
+          width: 100%;
+          overflow-x: auto;
         }
 
         th,
